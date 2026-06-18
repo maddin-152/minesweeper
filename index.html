@@ -146,7 +146,7 @@
     border-radius: 8px;
     cursor: pointer;
     transition: background 0.12s ease, transform 0.06s ease;
-    touch-action: manipulation;          /* kein Doppeltipp-Zoom */
+    touch-action: none;                  /* Halte-Geste nicht als Scroll werten */
     -webkit-touch-callout: none;         /* kein iOS-Kontextmenü beim Halten */
     -webkit-tap-highlight-color: transparent;
   }
@@ -259,12 +259,11 @@ function startGame() {
       cell.className = 'cell';
       cell.dataset.r = r;
       cell.dataset.c = c;
-      cell.addEventListener('click', onLeftClick);
+      cell.addEventListener('pointerdown', onPointerDown);
+      cell.addEventListener('pointermove', onPointerMove);
+      cell.addEventListener('pointerup', onPointerUp);
+      cell.addEventListener('pointercancel', clearPress);
       cell.addEventListener('contextmenu', onRightClick);
-      cell.addEventListener('touchstart', onTouchStart, { passive: true });
-      cell.addEventListener('touchend', onTouchEnd);
-      cell.addEventListener('touchmove', cancelTouch, { passive: true });
-      cell.addEventListener('touchcancel', cancelTouch);
       boardEl.appendChild(cell);
       grid[r][c].el = cell;
     }
@@ -311,33 +310,54 @@ function startTimer() {
   }, 1000);
 }
 
-// --- Maus-Events (Desktop) ---
-function onLeftClick(e)  { revealCell(e.currentTarget); }
-function onRightClick(e) { e.preventDefault(); toggleFlag(e.currentTarget); }
-
-// --- Touch-Events (Mobil): kurzer Tap = aufdecken, langes Drücken = Flagge ---
+// --- Pointer-Events: funktionieren für Maus, Touch & Stift gleichermaßen ---
+// Kurz drücken = aufdecken · lange halten (Maus oder Finger) = Flagge setzen
 const LONG_PRESS_MS = 400;
-let touchTimer = null;
+const MOVE_TOLERANCE = 10; // px – kleine Wackler brechen den Long-Press NICHT ab
+let pressTimer = null;
 let longPressed = false;
+let startX = 0, startY = 0;
 
-function onTouchStart(e) {
+function clearPress() {
+  if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+}
+
+function onPointerDown(e) {
   if (gameOver) return;
+  if (e.button && e.button !== 0) return; // bei Maus nur die linke Taste
   longPressed = false;
+  startX = e.clientX;
+  startY = e.clientY;
   const target = e.currentTarget;
-  touchTimer = setTimeout(() => {
+  // Pointer an die Zelle binden, damit up/move zuverlässig hier ankommen
+  if (target.setPointerCapture) {
+    try { target.setPointerCapture(e.pointerId); } catch (_) {}
+  }
+  clearPress();
+  pressTimer = setTimeout(() => {
     longPressed = true;
     toggleFlag(target);
     if (navigator.vibrate) navigator.vibrate(35); // haptisches Feedback
   }, LONG_PRESS_MS);
 }
 
-function onTouchEnd(e) {
-  clearTimeout(touchTimer);
-  e.preventDefault(); // unterdrückt den nachfolgenden synthetischen Klick
-  if (!longPressed) revealCell(e.currentTarget);
+function onPointerMove(e) {
+  if (!pressTimer) return;
+  if (Math.abs(e.clientX - startX) > MOVE_TOLERANCE ||
+      Math.abs(e.clientY - startY) > MOVE_TOLERANCE) {
+    clearPress(); // echte Wischbewegung -> kein Long-Press
+  }
 }
 
-function cancelTouch() { clearTimeout(touchTimer); } // bei Scrollen/Abbruch
+function onPointerUp(e) {
+  if (e.button && e.button !== 0) return; // Rechts-/Mittelklick deckt nicht auf
+  const wasLong = longPressed;
+  clearPress();
+  if (!wasLong) revealCell(e.currentTarget); // kurzer Druck = aufdecken
+}
+
+// --- Maus-Komfort: Rechtsklick flaggt weiterhin direkt ---
+function onRightClick(e) { e.preventDefault(); toggleFlag(e.currentTarget); }
 
 // --- Gemeinsame Spiellogik (Maus & Touch) ---
 function revealCell(el) {

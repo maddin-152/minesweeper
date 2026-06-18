@@ -146,6 +146,9 @@
     border-radius: 8px;
     cursor: pointer;
     transition: background 0.12s ease, transform 0.06s ease;
+    touch-action: manipulation;          /* kein Doppeltipp-Zoom */
+    -webkit-touch-callout: none;         /* kein iOS-Kontextmenü beim Halten */
+    -webkit-tap-highlight-color: transparent;
   }
   .cell:not(.revealed):hover { background: var(--hidden-hover); }
   .cell:not(.revealed):active { transform: scale(0.92); }
@@ -195,7 +198,7 @@
   </div>
 
   <div class="status" id="status"></div>
-  <div class="hint">Linksklick: aufdecken · Rechtsklick: Flagge setzen</div>
+  <div class="hint">Tippen / Linksklick: aufdecken · Halten / Rechtsklick: Flagge 🚩</div>
 
 <script>
 const DIFFICULTIES = {
@@ -258,6 +261,10 @@ function startGame() {
       cell.dataset.c = c;
       cell.addEventListener('click', onLeftClick);
       cell.addEventListener('contextmenu', onRightClick);
+      cell.addEventListener('touchstart', onTouchStart, { passive: true });
+      cell.addEventListener('touchend', onTouchEnd);
+      cell.addEventListener('touchmove', cancelTouch, { passive: true });
+      cell.addEventListener('touchcancel', cancelTouch);
       boardEl.appendChild(cell);
       grid[r][c].el = cell;
     }
@@ -304,10 +311,39 @@ function startTimer() {
   }, 1000);
 }
 
-function onLeftClick(e) {
+// --- Maus-Events (Desktop) ---
+function onLeftClick(e)  { revealCell(e.currentTarget); }
+function onRightClick(e) { e.preventDefault(); toggleFlag(e.currentTarget); }
+
+// --- Touch-Events (Mobil): kurzer Tap = aufdecken, langes Drücken = Flagge ---
+const LONG_PRESS_MS = 400;
+let touchTimer = null;
+let longPressed = false;
+
+function onTouchStart(e) {
   if (gameOver) return;
-  const r = +e.currentTarget.dataset.r;
-  const c = +e.currentTarget.dataset.c;
+  longPressed = false;
+  const target = e.currentTarget;
+  touchTimer = setTimeout(() => {
+    longPressed = true;
+    toggleFlag(target);
+    if (navigator.vibrate) navigator.vibrate(35); // haptisches Feedback
+  }, LONG_PRESS_MS);
+}
+
+function onTouchEnd(e) {
+  clearTimeout(touchTimer);
+  e.preventDefault(); // unterdrückt den nachfolgenden synthetischen Klick
+  if (!longPressed) revealCell(e.currentTarget);
+}
+
+function cancelTouch() { clearTimeout(touchTimer); } // bei Scrollen/Abbruch
+
+// --- Gemeinsame Spiellogik (Maus & Touch) ---
+function revealCell(el) {
+  if (gameOver) return;
+  const r = +el.dataset.r;
+  const c = +el.dataset.c;
   const cell = grid[r][c];
   if (cell.flagged || cell.revealed) return;
 
@@ -328,11 +364,10 @@ function onLeftClick(e) {
   checkWin();
 }
 
-function onRightClick(e) {
-  e.preventDefault();
+function toggleFlag(el) {
   if (gameOver) return;
-  const r = +e.currentTarget.dataset.r;
-  const c = +e.currentTarget.dataset.c;
+  const r = +el.dataset.r;
+  const c = +el.dataset.c;
   const cell = grid[r][c];
   if (cell.revealed) return;
 
